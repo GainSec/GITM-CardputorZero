@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=GainSec GITM
+Comment=Authorized AP, DHCP, and NAT controller
+Exec=/usr/share/GITM/bin/gitm
+Terminal=false
+Icon=share/images/gitm.png
+Categories=Security;System;

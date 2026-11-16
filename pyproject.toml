@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gainsec-gitm"
+version = "0.1.0"
+description = "Authorized AP, DHCP, and NAT controller for CardputerZero"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "GainSec"}]
+dependencies = ["pygame-ce>=2.5,<3"]
+
+[project.urls]
+Homepage = "https://github.com/GainSec/GITM-CardputorZero"
+Repository = "https://github.com/GainSec/GITM-CardputorZero"
+Issues = "https://github.com/GainSec/GITM-CardputorZero/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pillow>=10,<13"]
+
+[project.scripts]
+gitm = "gitm.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

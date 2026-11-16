@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+export PYTHONPATH=/usr/share/GITM
+exec /usr/bin/python3 -m gitm gui --backend auto "$@"

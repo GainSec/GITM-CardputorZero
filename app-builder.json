@@ -1,0 +1,40 @@
+{
+  "package_name": "gainsec-gitm",
+  "version": "0.1.0",
+  "app_name": "GainSec GITM",
+  "bin_name": "gitm",
+  "description": "Authorized AP, DHCP, and NAT controller for CardputerZero",
+  "store": {
+    "summary": "Authorized wired-WAN Wi-Fi AP, DHCP, and NAT controller",
+    "description": "A native, fail-closed CardputerZero interface for creating an authorized WPA2 access point with a physical wired Ethernet WAN, private DHCP/DNS state, and package-owned nftables NAT. TLS interception and packet capture are excluded from this release.",
+    "categories": [
+      "Security",
+      "System Tools"
+    ],
+    "screenshots": [
+      "screenshots/preflight.png",
+      "screenshots/review.png",
+      "screenshots/starting.png",
+      "screenshots/active.png",
+      "screenshots/stopping.png",
+      "screenshots/error.png"
+    ],
+    "icon": "assets/gitm-icon-256.png",
+    "license": "MIT",
+    "source_repo": "https://github.com/GainSec/GITM-CardputorZero",
+    "author": {
+      "display_name": "GainSec"
+    },
+    "share_code": "GITM",
+    "permissions": {
+      "camera": false,
+      "microphone": false,
+      "imu": false,
+      "network": true,
+      "additional_hardware": false,
+      "background_service": true,
+      "external_display": false
+    },
+    "locales": {}
+  }
+}

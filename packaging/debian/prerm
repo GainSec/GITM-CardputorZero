@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ]; then
+    /usr/libexec/gainsec-gitm-helper stop
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop gainsec-gitm-helper.socket gainsec-gitm-helper.service >/dev/null 2>&1
+    fi
+fi
+
+exit 0
