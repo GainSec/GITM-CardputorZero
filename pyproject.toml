@@ -1,17 +1,17 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gainsec-gitm"
-version = "0.1.0"
-description = "Authorized AP, DHCP, and NAT controller for CardputerZero"
+version = "0.2.1"
+description = "Full-feature authorized traffic research router for CardputerZero"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "GainSec"}]
-dependencies = ["pygame-ce>=2.5,<3"]
+dependencies = ["pygame-ce>=2.5,<3", "cryptography>=38"]
 
 [project.urls]
 Homepage = "https://github.com/GainSec/GITM-CardputorZero"

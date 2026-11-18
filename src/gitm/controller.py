@@ -22,6 +22,7 @@ def generate_session_config(backend: Backend) -> NetworkConfig:
         resolver="1.1.1.1",
         ap_interface=discovery.ap_interfaces[0],
         wan_interface=discovery.wan_interfaces[0],
+        lease_events=True,
     )
     return validate_config(config, discovery.existing_networks)
 
@@ -43,13 +44,22 @@ class Controller:
             self.state = AppState.ERROR
             return
         try:
-            self.config = generate_session_config(self.backend)
+            self.config = self.config or generate_session_config(self.backend)
             self.plan = build_plan(self.config)
         except (BackendUnavailable, ValueError) as exc:
             self.error = str(exc)
             self.state = AppState.ERROR
             return
         self.state = AppState.REVIEW
+
+    def update_config(self, config: NetworkConfig) -> None:
+        if self.state in {AppState.STARTING, AppState.ACTIVE, AppState.STOPPING}:
+            raise ValueError("stop session before editing configuration")
+        self.config = config
+        self.plan = None
+        self.authorized = False
+        # Retain incomplete edits so a certificate/key pair can be entered one field at a time.
+        self.plan = build_plan(config)
 
     def set_authorized(self, acknowledged: bool) -> None:
         self.authorized = acknowledged

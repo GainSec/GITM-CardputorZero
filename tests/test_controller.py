@@ -96,3 +96,9 @@ def test_controller_fails_closed_on_discovered_subnet_overlap():
     controller.preflight()
     assert controller.state is AppState.ERROR
     assert "overlaps" in controller.error
+
+
+def test_new_operator_sessions_enable_lease_event_logging_by_default():
+    from gitm.controller import generate_session_config
+    from gitm.backends.sim import SimBackend
+    assert generate_session_config(SimBackend()).lease_events is True

@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..model import InterfaceDiscovery
+from ..certificates import CAMaterial
+from ..model import InterfaceDiscovery, NetworkConfig
 from ..plan import OperationPlan
 
 
@@ -29,3 +30,6 @@ class Backend(Protocol):
     def start(self, plan: OperationPlan) -> dict[str, object]: ...
     def stop(self) -> dict[str, object]: ...
     def status(self) -> dict[str, object]: ...
+
+    def ca_material(self, config: NetworkConfig) -> CAMaterial: ...
+    def inspect(self, *, kind: str = "live", limit: int = 20) -> dict[str, object]: ...

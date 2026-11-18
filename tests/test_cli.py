@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 import pygame
+import gitm
 
 from gitm.backends.sim import SimBackend
 from gitm.cli import _run_gui, _stop_owned_session, main
@@ -37,7 +38,7 @@ def test_system_backend_failure_is_not_replaced_by_simulator(capsys):
 
 
 def test_python_m_gitm_delegates_to_cli(tmp_path):
-    env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1] / "src"))
+    env = dict(os.environ, PYTHONPATH=str(Path(gitm.__file__).resolve().parents[1]))
     result = subprocess.run(
         [sys.executable, "-m", "gitm", "status", "--backend", "sim"],
         check=True,

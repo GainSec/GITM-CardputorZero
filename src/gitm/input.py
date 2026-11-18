@@ -34,6 +34,8 @@ class InputMapper:
                 return None
             self._escape_down = True
             return UiAction.BACK
+        if self.text_entry and event.key == pygame.K_SPACE:
+            return UiAction.TEXT
         native = {
             pygame.K_LEFT: UiAction.LEFT,
             pygame.K_RIGHT: UiAction.RIGHT,
@@ -45,6 +47,8 @@ class InputMapper:
         if event.key in native:
             return native[event.key]
         aliases = {
+            pygame.K_w: UiAction.UP,
+            pygame.K_s: UiAction.DOWN,
             pygame.K_f: UiAction.LEFT,
             pygame.K_x: UiAction.RIGHT,
             pygame.K_z: UiAction.BACK,

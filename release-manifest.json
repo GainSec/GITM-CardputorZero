@@ -1,0 +1,163 @@
+{
+  "acceptance": {
+    "inherited_device_checks_passed": 17,
+    "limits": [
+      "Framebuffer/evdev path does not establish mechanical key or optical panel condition.",
+      "Export format checks do not claim Android/Burp GUI import testing."
+    ],
+    "new_physical_run_performed": false,
+    "sole_waived_proof": "Concurrent two-station isolation: second authorized Wi-Fi client unavailable; unproven, not a pass."
+  },
+  "architecture": "arm64",
+  "checks": {
+    "bash_and_posix_shell_syntax": "passed",
+    "compileall": "passed (src tools tests)",
+    "complete_payload_source_bytes": "passed (104 data files and 4 control files)",
+    "git_diff_check": "passed",
+    "host_root_pytest_warnings_as_errors": 252,
+    "installed_arm64_root_pytest_warnings_as_errors": 252,
+    "installed_arm64_smoke": "passed (real SSLsplit TLS, PCAP rotation/readback, bounded workers, exports, CLI and six native frames)",
+    "installed_import_root": "/usr/share/GITM",
+    "openssl_exact_profile_regression": "passed (12 profiles)",
+    "operator_identity_and_private_provenance_scan": "zero findings",
+    "package_metadata_and_policy": "passed",
+    "readme_cli_examples_executed": 30,
+    "readme_links": "passed (anchors and repository files)",
+    "readme_shell_blocks_checked": 14,
+    "systemd_analyze_verify": "passed"
+  },
+  "debian_version": "0.2.1-1",
+  "package": {
+    "bytes": 254368,
+    "path": "dist/gainsec-gitm_0.2.1-1_arm64.deb",
+    "sha256": "b2ce0020adbed7738ee42c08138ee13038718b3464504a577e2adf9811179d3e"
+  },
+  "profile_verification": {
+    "checks": [
+      "SHA-256 and Git blob pins",
+      "certificate/key match",
+      "CA:TRUE and keyCertSign",
+      "validity and complete issuer/signature chain",
+      "manifest fingerprint",
+      "source commit byte equality"
+    ],
+    "directories": 12,
+    "exact_source_files": 54,
+    "intentional_key_files": 12,
+    "other_private_keys": 0
+  },
+  "public_audit": {
+    "dependencies": [
+      "python3 (>= 3.11)",
+      "python3-pygame",
+      "hostapd",
+      "dnsmasq-base",
+      "network-manager",
+      "nftables",
+      "iw",
+      "iproute2",
+      "systemd",
+      "adduser",
+      "sslsplit",
+      "tcpdump",
+      "openssl",
+      "python3-cryptography"
+    ],
+    "exact_source_and_payload_bytes": true,
+    "independent_source_profile_files_verified": 54,
+    "ok": true,
+    "payload": {
+      "exact_public_profile_keys_allowlisted": [
+        "dv-g3b-aaa/ca.key",
+        "dv-g3b-emsign/ca.key",
+        "dv-g3c-aaa/ca.key",
+        "dv-g3c-emsign/ca.key",
+        "ev-g3b-aaa/ca.key",
+        "ev-g3b-emsign/ca.key",
+        "ev-g3c-aaa/ca.key",
+        "ev-g3c-emsign/ca.key",
+        "ov-g3b-aaa/ca.key",
+        "ov-g3b-emsign/ca.key",
+        "ov-g3c-aaa/ca.key",
+        "ov-g3c-emsign/ca.key"
+      ],
+      "files_scanned": 108
+    },
+    "payload_files": 108,
+    "source": {
+      "exact_public_profile_keys_allowlisted": [
+        "dv-g3b-aaa/ca.key",
+        "dv-g3b-emsign/ca.key",
+        "dv-g3c-aaa/ca.key",
+        "dv-g3c-emsign/ca.key",
+        "ev-g3b-aaa/ca.key",
+        "ev-g3b-emsign/ca.key",
+        "ev-g3c-aaa/ca.key",
+        "ev-g3c-emsign/ca.key",
+        "ov-g3b-aaa/ca.key",
+        "ov-g3b-emsign/ca.key",
+        "ov-g3c-aaa/ca.key",
+        "ov-g3c-emsign/ca.key"
+      ],
+      "files_scanned": 141
+    },
+    "validated_source_commit": "ae20080ca2e4cfc6d0fcd399ea09c7068c88c15e"
+  },
+  "public_history_parent": "c20fca56681a0ca3774589c7aef27996de572391",
+  "publication": "Verified local candidate only; no push performed.",
+  "repository": "https://github.com/GainSec/GITM-CardputorZero",
+  "runtime_module_sha256": {
+    "src/gitm/__init__.py": "8ad8abf465bdf0f1648177dc21d2898d99207ae43080b10a41f02ef42dfb7b34",
+    "src/gitm/__main__.py": "1d5064e62e33f58383aec4c40e3a7bd709fc7df094a6d4854173baf4be7863bd",
+    "src/gitm/backends/__init__.py": "cf5311e66e86a8f5e35463c57d470870931e793136698445a4112b0fd83d602e",
+    "src/gitm/backends/base.py": "a7c372f121fcecd0f2faf0ac5ceca9f47139031868451e652007edaeb02a3165",
+    "src/gitm/backends/select.py": "24f5105cf9453c4c9ca95417199a35f6bf58882c6882b924724506c998672125",
+    "src/gitm/backends/sim.py": "5c354967dc4e5a00ba40ae8c889b9a24c61ec1f7ea870c4062acee334b9c657b",
+    "src/gitm/backends/system.py": "5c423014f542e349c3439f3f248a6e5014d54cab7616e00de3ddf9ac7b810d98",
+    "src/gitm/certificates.py": "03d461bca8a99312cf7e1f0c219c0c8516ddcd9d954c40c591a42facebdd2e9a",
+    "src/gitm/cli.py": "1d78c4e50b033500ce9323db6c897c2d05161a78e9e3fdb8c3d880c8f6531a98",
+    "src/gitm/configuration.py": "06ce28d66f7f038d5910a4bdf932a34cbbe682ed1d5fe2cb89ad5266e4491d73",
+    "src/gitm/controller.py": "fd09b3e721f018d2f18fefca90832e5bb7838ae5e5c5294e10ca22ac754ea7fd",
+    "src/gitm/discovery.py": "b654a4c54eeb27d53e2237c3a2e1dbaa488aebaab07dabb7d8680aa08be9b00a",
+    "src/gitm/feature_ui.py": "506b46cf3d8a97d6b307f20980bb71e9f3fd35def608475564da6d894b871229",
+    "src/gitm/framebuffer.py": "3425b4542c13d5d6b82f519dea850ee125a8c4387e0783ce59c766162a5a4df6",
+    "src/gitm/gui.py": "41a7c67550932361241ebb55961bd4f20c32ea2cb890e281036cff4173eb7d8f",
+    "src/gitm/helper.py": "03d6321c7fb915e1f0fd2b86c3d5ad0ee18ed77b9ef4f5d93e81c005fb7c1980",
+    "src/gitm/input.py": "80bce30da7ae74a856d1cbf9d0fcae09fc25e40bb6b3dd0ce798ca6ed21c3c41",
+    "src/gitm/model.py": "ed5f7d54d29970406c9c76b7ae0f151ad1777cabfad9629142368bfe6b6a11cc",
+    "src/gitm/native_input.py": "d5003f396a20e4772e9a98e88fa8767ee50548ddebd5eeea5c790c80ef0756a0",
+    "src/gitm/plan.py": "ca531a0605f7c2b1a71724e8de973e838222951f7f9e9ebce0853c0c09508b88",
+    "src/gitm/profiles.py": "83cd02e9fc7cc84d08def572f025a47d1bf57c0bdae40d4cae903d90a6404ae0",
+    "src/gitm/theme.py": "882693e18f2e1788b5945142b17e00cbdaa40c0c67716866657fefef98d4b057",
+    "src/gitm/validation.py": "29309048f5d6d427f6cd4261523d943e0d3fcbf5c53ae5c26a78a1c85ba914b1",
+    "src/gitm/worker.py": "331510f731106c915a80be20209d75c5ef9ec7134c08c12d32052e6020a1fbfe"
+  },
+  "schema_version": 1,
+  "source_reconciliation": {
+    "byte_identical_files": 120,
+    "profile_directory_files_byte_identical": 54,
+    "public_files": 136,
+    "runtime_modules_byte_identical": true,
+    "sanitized_or_release_gate_files": [
+      ".gitignore",
+      "README.md",
+      "app-builder.json",
+      "docs/CARDPUTERZERO.md",
+      "packaging/debian/control",
+      "profiles/emudhra/README.md",
+      "profiles/emudhra/provenance.json",
+      "pyproject.toml",
+      "tests/conftest.py",
+      "tests/test_certificates.py",
+      "tests/test_cli.py",
+      "tests/test_packaging.py",
+      "tools/audit_payload.py",
+      "tools/installed_smoke.py",
+      "tools/render_screenshots.py",
+      "tools/smoke_arm64.sh"
+    ],
+    "validated_source_commit": "ae20080ca2e4cfc6d0fcd399ea09c7068c88c15e"
+  },
+  "validated_source_commit": "ae20080ca2e4cfc6d0fcd399ea09c7068c88c15e",
+  "version": "0.2.1"
+}

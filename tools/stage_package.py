@@ -6,8 +6,8 @@ import shutil
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0"
-DEBIAN_VERSION = "0.1.0-1"
+VERSION = "0.2.1"
+DEBIAN_VERSION = "0.2.1-1"
 PACKAGE_FILENAME = f"gainsec-gitm_{DEBIAN_VERSION}_arm64.deb"
 SYSTEM_ROOTS = tuple(Path(item) for item in ("/bin", "/etc", "/lib", "/lib64", "/sbin", "/usr", "/var"))
 
@@ -54,15 +54,16 @@ def stage_package(destination: Path) -> Path:
     _copy(ROOT / "assets/gitm-icon-256.png", destination / "usr/share/GITM/assets/gitm-icon-256.png")
     _copy(ROOT / "packaging/systemd/gainsec-gitm-helper.socket", destination / "lib/systemd/system/gainsec-gitm-helper.socket")
     _copy(ROOT / "packaging/systemd/gainsec-gitm-helper.service", destination / "lib/systemd/system/gainsec-gitm-helper.service")
-    doc_root = destination / "usr/share/doc/gainsec-gitm"
-    _copy(ROOT / "LICENSE", doc_root / "LICENSE")
-    _copy(ROOT / "README.md", doc_root / "README.md")
-    _copy(ROOT / "CONTRIBUTING.md", doc_root / "CONTRIBUTING.md")
-    _copy(ROOT / "SECURITY.md", doc_root / "SECURITY.md")
-    _copy(ROOT / "docs/CARDPUTERZERO.md", doc_root / "docs/CARDPUTERZERO.md")
-    _copy(ROOT / "assets/gitm-icon-256.png", doc_root / "assets/gitm-icon-256.png")
-    for screenshot in sorted((ROOT / "screenshots").glob("*.png")):
-        _copy(screenshot, doc_root / "screenshots" / screenshot.name)
+    _copy(ROOT / "README.md", destination / "usr/share/doc/gainsec-gitm/README.md")
+    _copy(ROOT / "app-builder.json", destination / "usr/share/GITM/app-builder.json")
+    for image in (ROOT / "screenshots").glob("*.png"):
+        _copy(image, destination / "usr/share/GITM/screenshots" / image.name)
+    for asset in (ROOT / "profiles/emudhra").rglob("*"):
+        if asset.is_file():
+            _copy(asset, destination / "usr/share/GITM/profiles/emudhra" / asset.relative_to(ROOT / "profiles/emudhra"), 0o640 if asset.suffix == ".key" else 0o644)
+    _copy(ROOT / "LICENSE", destination / "usr/share/doc/gainsec-gitm/LICENSE")
+    _copy(ROOT / "LICENSE", destination / "usr/share/doc/gainsec-gitm/copyright")
+    _copy(ROOT / "docs/CARDPUTERZERO.md", destination / "usr/share/doc/gainsec-gitm/README.CardputerZero.md")
 
     package_source = ROOT / "src/gitm"
     package_target = destination / "usr/share/GITM/gitm"

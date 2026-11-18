@@ -5,18 +5,23 @@ After=network.target
 
 [Service]
 Type=simple
+SuccessExitStatus=130 143
 ExecStart=/usr/libexec/gainsec-gitm-helper serve
 KillMode=control-group
 User=root
 Group=root
 RuntimeDirectory=gainsec-gitm
 RuntimeDirectoryMode=0755
+# The independently active socket owns helper.sock in this shared directory.
+RuntimeDirectoryPreserve=yes
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/run/gainsec-gitm /var/log/gainsec-gitm /proc/sys/net/ipv4/ip_forward
+ReadWritePaths=/run/gainsec-gitm /var/log/gainsec-gitm /var/lib/gainsec-gitm /proc/sys/net/ipv4/ip_forward
+StateDirectory=gainsec-gitm
+StateDirectoryMode=0711
 LogsDirectory=gainsec-gitm
 LogsDirectoryMode=0700
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_KILL CAP_SETUID CAP_SETGID
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_KILL CAP_SETUID CAP_SETGID
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_KILL CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_KILL CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER

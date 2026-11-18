@@ -1,23 +1,23 @@
 {
   "package_name": "gainsec-gitm",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "app_name": "GainSec GITM",
   "bin_name": "gitm",
-  "description": "Authorized AP, DHCP, and NAT controller for CardputerZero",
+  "description": "Authorized AP, capture, live inspection and TLS research for CardputerZero",
   "store": {
-    "summary": "Authorized wired-WAN Wi-Fi AP, DHCP, and NAT controller",
-    "description": "A native, fail-closed CardputerZero interface for creating an authorized WPA2 access point with a physical wired Ethernet WAN, private DHCP/DNS state, and package-owned nftables NAT. TLS interception and packet capture are excluded from this release.",
+    "summary": "Native AP, PCAP capture, TLS and live traffic research",
+    "description": "Native keyboard controls for a WPA2 research AP with wired WAN, isolated clients, bounded PCAP and metadata logs, SSLsplit with local or validated custom CAs, twelve exact recovered lab profiles, Android and Burp exports, and owned rollback. Native C0 framebuffer/Fn keyboard and real-client operation are device-tested; concurrent two-station isolation is the sole waived acceptance proof. Simulator mode is explicit.",
     "categories": [
       "Security",
       "System Tools"
     ],
     "screenshots": [
-      "screenshots/preflight.png",
       "screenshots/review.png",
-      "screenshots/starting.png",
+      "screenshots/settings.png",
       "screenshots/active.png",
-      "screenshots/stopping.png",
-      "screenshots/error.png"
+      "screenshots/traffic.png",
+      "screenshots/profiles.png",
+      "screenshots/exports.png"
     ],
     "icon": "assets/gitm-icon-256.png",
     "license": "MIT",

@@ -37,6 +37,10 @@ class ViewData:
     passphrase: str = field(default_factory=lambda: _demo_credentials()[1])
     authorized: bool = False
     backend: str = "sim"
+    capture: bool = False
+    live: bool = False
+    tls: bool = False
+    leases: bool = False
 
 
 def _demo_credentials() -> tuple[str, str]:
@@ -47,7 +51,7 @@ def _demo_credentials() -> tuple[str, str]:
 
 
 def demo_view(state: AppState) -> ViewData:
-    return ViewData(authorized=state in (AppState.STARTING, AppState.ACTIVE, AppState.STOPPING))
+    return ViewData(authorized=state in (AppState.STARTING, AppState.ACTIVE, AppState.STOPPING), capture=True, live=True, tls=True, leases=True)
 
 
 def visible_lines(state: AppState, view: ViewData) -> tuple[str, ...]:
@@ -58,7 +62,7 @@ def visible_lines(state: AppState, view: ViewData) -> tuple[str, ...]:
         f"KEY  {view.passphrase}",
         f"AUTHORIZED {'YES' if view.authorized else 'NO'}",
         f"{view.backend.upper()} / {state.value}",
-        "TLS OFF  ·  CAPTURE OFF",
+        f"TLS {'ON' if view.tls else 'OFF'}  ·  CAPTURE {'ON' if view.capture else 'OFF'}  ·  LIVE {'ON' if view.live else 'OFF'}",
     )
 
 
@@ -107,7 +111,7 @@ def render_state(
     pygame.draw.rect(surface, theme.PANEL, (13, 29, 294, 120), border_radius=8)
     pygame.draw.rect(surface, accent, (13, 29, 294, 120), width=2, border_radius=8)
 
-    _label(surface, "GAINSEC / C0  v0.1.0", (16, 9), small, theme.WHITE, 180)
+    _label(surface, "GAINSEC / C0  v0.2.1", (16, 9), small, theme.WHITE, 180)
     _label(surface, title, (246, 10), tiny, accent, 58)
     _label(surface, heading, (23, 35), medium, theme.WHITE, 273)
     for index, line in enumerate(visible_lines(state, view)):
@@ -116,7 +120,7 @@ def render_state(
             color = theme.MUTED
         _label(surface, line, (23, 55 + index * 13), small if index < 5 else tiny, color, 273)
     if state is AppState.REVIEW:
-        hint = "C TO START" if view.authorized else "C TO ACKNOWLEDGE"
+        hint = "C START  F/X PAGES" if view.authorized else "C ACKNOWLEDGE  F/X PAGES"
     footer = error if state is AppState.ERROR else hint
     _label(surface, footer, (17, 154), tiny, theme.YELLOW, 286)
     mirror(surface, sink)

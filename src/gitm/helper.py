@@ -3,18 +3,24 @@
 import argparse
 from dataclasses import asdict, dataclass
 from enum import Enum, auto
+from ipaddress import ip_network
 import json
 import os
 from pathlib import Path
 import shutil
+import resource
+import pwd
+import struct
 import signal
 import socket
 import subprocess
 from typing import Callable, Mapping, Sequence
 
+from .certificates import CAMaterial, atomic_private, ensure_local_ca, validate_material
+from .profiles import verify_profile
 from .discovery import discover_interfaces
-from .model import InterfaceDiscovery
-from .plan import AP_SURFACE, NFT_TABLE, OperationPlan, RUNTIME_DIR, build_plan
+from .model import InterfaceDiscovery, NetworkConfig
+from .plan import AP_SURFACE, NFT_TABLE, OperationPlan, RUNTIME_DIR, DATA_DIR, LEASE_DIR, build_plan
 from .validation import ValidationError, validate_config
 
 
@@ -62,10 +68,16 @@ def _unblock_child_termination_signals() -> None:
 
 
 def _spawn(argv: Sequence[str]) -> subprocess.Popen[bytes]:
+    setup = _unblock_child_termination_signals
+    if argv[0] in {"sslsplit", "tcpdump"}:
+        limit = 512 * 1024 if argv[0] == "sslsplit" else (int(argv[argv.index("-C") + 1]) * 1_000_000 + 1_000_000)
+        def setup():
+            _unblock_child_termination_signals()
+            resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
     return subprocess.Popen(
         list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, env={**os.environ, "PATH": TRUSTED_TOOL_PATH},
-        preexec_fn=_unblock_child_termination_signals,
+        preexec_fn=setup,
     )
 
 
@@ -137,6 +149,54 @@ def _process_identity(pid: int, *, proc_root: Path = Path("/proc")) -> ProcessId
         return None
 
 
+def _owned_proxy_children(identity: ProcessIdentity, *, proc_root: Path = Path("/proc")) -> tuple[ProcessIdentity, ...]:
+    """Kernel-proven direct SSLsplit descendants, never a process-name search."""
+    if _process_identity(identity.pid, proc_root=proc_root) != identity:
+        return ()
+    try:
+        raw = (proc_root / str(identity.pid) / "task" / str(identity.pid) / "children").read_text(encoding="ascii")
+        pids = [int(value) for value in raw.split()]
+        if len(pids) > 8:
+            return ()
+        children = []
+        for pid in pids:
+            candidate = _process_identity(pid, proc_root=proc_root)
+            stat = (proc_root / str(pid) / "stat").read_text(encoding="ascii").rpartition(") ")[2].split()
+            if (candidate is not None and int(stat[1]) == identity.pid
+                    and candidate.comm == "sslsplit" and candidate.executable == identity.executable
+                    and candidate.start_time >= identity.start_time):
+                children.append(candidate)
+        if _process_identity(identity.pid, proc_root=proc_root) == identity:
+            return tuple(children)
+    except (OSError, ValueError, IndexError):
+        pass
+    return ()
+
+
+def _owned_listener(identity: ProcessIdentity, address: str, *, proc_root: Path = Path("/proc"), include_proxy: bool = True) -> bool:
+    """Prove the supervisor or its kernel-proven proxy owns the TLS socket."""
+    if include_proxy and any(_owned_listener(child, address, proc_root=proc_root, include_proxy=False) for child in _owned_proxy_children(identity, proc_root=proc_root)):
+        return True
+    root = proc_root / str(identity.pid)
+    try:
+        inodes = set()
+        for entry in (root / "fd").iterdir():
+            try:
+                link = os.readlink(entry)
+            except OSError:
+                continue
+            if link.startswith("socket:[") and link.endswith("]"):
+                inodes.add(link[8:-1])
+        local = socket.inet_aton(address)[::-1].hex().upper() + ":20FB"
+        for line in (root / "net/tcp").read_text(encoding="ascii").splitlines()[1:]:
+            fields = line.split()
+            if len(fields) >= 10 and fields[1] == local and fields[3] == "0A" and fields[9] in inodes:
+                return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def _probe_command(argv: Sequence[str]) -> bool:
     try:
         result = subprocess.run(
@@ -203,6 +263,7 @@ class HelperEngine:
         self,
         *,
         runtime_dir: Path = Path(RUNTIME_DIR),
+        data_dir: Path = Path(DATA_DIR),
         forwarding_path: Path = Path("/proc/sys/net/ipv4/ip_forward"),
         runner: CommandRunner = _run,
         spawner: ProcessSpawner = _spawn,
@@ -210,9 +271,13 @@ class HelperEngine:
         killer: Callable[[int, int], None] = os.kill,
         resource_probe: Callable[[], Sequence[str]] | None = None,
         resource_liveness: Callable[[], Mapping[str, bool]] | None = None,
+        listener_probe: Callable[[ProcessIdentity, str], bool] | None = None,
+        proxy_children: Callable[[ProcessIdentity], Sequence[ProcessIdentity]] | None = None,
         evidence_provider: Callable[[], InterfaceDiscovery] | None = None,
         sleeper: Callable[[float], None] | None = None,
         wait_attempts: int = 10,
+        proxy_wait_attempts: int = 200,
+        startup_wait_attempts: int = 200,
         stabilization_interval: float = 0.5,
         child_cleanup_timeout: float = 0.5,
         log: BoundedLog | None = None,
@@ -220,11 +285,16 @@ class HelperEngine:
         transition_hook: Callable[[str, str | None], None] | None = None,
     ):
         self.runtime_dir = runtime_dir
+        self.data_dir = data_dir
+        self.lease_dir = runtime_dir.parent / "leases"
         self.forwarding_path = forwarding_path
         self.runner = runner
         self.spawner = spawner
         self._children: dict[int, object] = {}
         self.identity_provider = identity_provider
+        self._require_proxy = runner is _run or proxy_children is not None
+        self.proxy_children = proxy_children or _owned_proxy_children
+        self.listener_probe = listener_probe or (_owned_listener if runner is _run else lambda _identity, _address: True)
         self.killer = killer
         self.resource_probe = (
             resource_probe
@@ -244,6 +314,8 @@ class HelperEngine:
             sleeper = time.sleep
         self.sleeper = sleeper
         self.wait_attempts = wait_attempts
+        self.proxy_wait_attempts = proxy_wait_attempts
+        self.startup_wait_attempts = startup_wait_attempts
         self.stabilization_interval = stabilization_interval
         self.child_cleanup_timeout = child_cleanup_timeout
         self.signal_masker = signal_masker if signal_masker is not None else getattr(signal, "pthread_sigmask", None)
@@ -255,6 +327,7 @@ class HelperEngine:
         else:
             self.log = BoundedLog(runtime_dir.parent / "events.log")
         self.state_path = runtime_dir / "state.json"
+        self._last_failure: list[str] = []
 
     def _write_private(self, path: Path, content: str) -> None:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -299,11 +372,14 @@ class HelperEngine:
             and state.get("previous_ipv4_forwarding") in {"0", "1"}
         ):
             return False
+        optional = state.get("optional_processes", [])
+        if not isinstance(optional, list) or not all(isinstance(x, str) and x in {"tcpdump", "sslsplit", "sslsplit_worker", "live", "leases"} for x in optional) or len(optional) != len(set(optional)):
+            return False
         processes = state.get("processes", {})
         if not isinstance(processes, Mapping):
             return False
         for name, raw in processes.items():
-            if name not in {"dnsmasq", "hostapd"} or not isinstance(raw, Mapping):
+            if name not in {"dnsmasq", "hostapd", "tcpdump", "live", "leases", "sslsplit", "sslsplit_worker"} or not isinstance(raw, Mapping):
                 return False
             if set(raw) != {"pid", "start_time", "comm", "executable"}:
                 return False
@@ -320,7 +396,7 @@ class HelperEngine:
         if not isinstance(launches, Mapping):
             return False
         for name, raw in launches.items():
-            if name not in {"dnsmasq", "hostapd"} or not isinstance(raw, Mapping):
+            if name not in {"dnsmasq", "hostapd", "tcpdump", "live", "leases", "sslsplit", "sslsplit_worker"} or not isinstance(raw, Mapping):
                 return False
             if raw.get("status") not in {"intent", "spawn_failed", "identified"}:
                 return False
@@ -353,17 +429,17 @@ class HelperEngine:
                 raise HelperError(f"{name} returned unsafe child PID")
             self.transition_hook("child_spawned", name)
             identity = None
-            for attempt in range(self.wait_attempts):
+            for attempt in range(self.startup_wait_attempts):
                 candidate = self.identity_provider(child.pid)
                 if (
                     candidate is not None
                     and candidate.pid == child.pid
-                    and candidate.comm == name
-                    and Path(candidate.executable).name == name
+                    and candidate.comm == (f"gitm-{name}" if name in {"live", "leases"} else name)
+                    and (candidate.executable in {os.path.realpath("/usr/bin/python3"), "/usr/bin/python3.11"} if name in {"live", "leases"} else Path(candidate.executable).name == name)
                 ):
                     identity = candidate
                     break
-                if attempt + 1 < self.wait_attempts:
+                if attempt + 1 < self.startup_wait_attempts:
                     self.sleeper(0.05)
             if identity is None:
                 raise HelperError(f"{name} child is not live with expected identity after launch")
@@ -378,6 +454,8 @@ class HelperEngine:
             self._save_state(candidate_state)
             state.clear()
             state.update(candidate_state)
+            if name == "sslsplit" and self._require_proxy:
+                self._register_proxy(state)
             self.transition_hook("identity_saved", name)
             return identity
         except BaseException:
@@ -396,9 +474,34 @@ class HelperEngine:
             if self.signal_masker is not None:
                 self.signal_masker(signal.SIG_SETMASK, old_mask if old_mask is not None else frozenset())
 
+    def _register_proxy(self, state: dict[str, object]) -> None:
+        parent = ProcessIdentity.from_dict(state["processes"]["sslsplit"])
+        candidates = ()
+        for attempt in range(self.proxy_wait_attempts):
+            candidates = tuple(self.proxy_children(parent))
+            if len(candidates) == 1:
+                break
+            if attempt + 1 < self.proxy_wait_attempts:
+                self.sleeper(0.05)
+        if len(candidates) != 1:
+            raise HelperError("sslsplit proxy identity missing or ambiguous")
+        state["processes"]["sslsplit_worker"] = candidates[0].to_dict()
+        if "sslsplit_worker" not in state.setdefault("optional_processes", []):
+            state["optional_processes"].append("sslsplit_worker")
+        self._save_state(state)
+
     def _cleanup_direct_child(self, child: subprocess.Popen[bytes]) -> None:
         """Terminate and reap a retained direct child without trusting /proc identity."""
         pid = child.pid
+        descendants = ()
+        if self._require_proxy:
+            try:
+                identity = self.identity_provider(pid)
+                if identity is not None and identity.comm == "sslsplit":
+                    descendants = tuple(self.proxy_children(identity))
+            except Exception:
+                # Identity lookup failure must never prevent direct-child cleanup.
+                pass
         reaped = False
         try:
             try:
@@ -421,6 +524,8 @@ class HelperEngine:
                     pass
         finally:
             self._children.pop(pid, None)
+        if any(self.identity_provider(item.pid) == item for item in descendants):
+            raise FatalChildCleanup("SSLsplit proxy exit is unproven; cgroup cleanup required")
         if not reaped:
             raise FatalChildCleanup(f"cannot prove direct child exit for PID {pid}")
 
@@ -429,7 +534,7 @@ class HelperEngine:
         processes = state.get("processes", {})
         if not isinstance(processes, Mapping):
             return ["owned process identity evidence missing"]
-        for name in ("hostapd", "dnsmasq"):
+        for name in ("hostapd", "dnsmasq", *state.get("optional_processes", [])):
             raw = processes.get(name)
             if not isinstance(raw, Mapping):
                 errors.append(f"{name} identity missing")
@@ -442,6 +547,8 @@ class HelperEngine:
             self._reap_child(expected.pid)
             if self.identity_provider(expected.pid) != expected:
                 errors.append(f"{name} identity is not live")
+            elif name == "sslsplit" and not self.listener_probe(expected, str(state.get("tls_address", ""))):
+                errors.append("sslsplit owned TLS listener is not live")
         live_resources = self.resource_liveness()
         for resource in (AP_SURFACE, NFT_TABLE):
             if not live_resources.get(resource, False):
@@ -462,7 +569,7 @@ class HelperEngine:
         processes = state.get("processes", {})
         if not isinstance(processes, Mapping) or not isinstance(progress, dict):
             return errors
-        for name in ("hostapd", "dnsmasq"):
+        for name in ("live", "leases", "tcpdump", "sslsplit_worker", "sslsplit", "hostapd", "dnsmasq"):
             key = f"process:{name}"
             if progress.get(key):
                 continue
@@ -561,7 +668,16 @@ class HelperEngine:
 
     def _remove_private_state(self) -> list[str]:
         errors = []
+        try:
+            (self.lease_dir / "dnsmasq.leases").unlink(missing_ok=True)
+            if self.lease_dir.exists():
+                self.lease_dir.rmdir()
+        except OSError as exc:
+            errors.append(f"remove lease state: {exc}")
         for name in (
+            "ca.crt",
+            "ca.key",
+            "chain.pem",
             "hostapd.conf",
             "dnsmasq.conf",
             "nftables.conf",
@@ -632,8 +748,14 @@ class HelperEngine:
                 errors.append(f"retain cleanup state: {exc}")
         return errors
 
-    def start(self, plan: OperationPlan) -> dict[str, object]:
+    def start(self, plan: OperationPlan, *, ca_material: CAMaterial | None = None) -> dict[str, object]:
         plan = validate_plan_for_helper(plan)
+        if plan.config.profile:
+            ca_material = verify_profile(plan.config.profile)
+        elif ca_material is not None:
+            ca_material = validate_material(ca_material.certificate, ca_material.private_key, ca_material.chain)
+        elif plan.config.ca_cert:
+            raise HelperError("validated custom CA material is required")
         loaded = self._load_state()
         if loaded.kind is StateKind.VALID_OWNED:
             raise HelperError("owned session state exists; successful stop/recovery required before start")
@@ -662,16 +784,49 @@ class HelperEngine:
         if previous not in {"0", "1"}:
             raise HelperError("invalid IPv4 forwarding state")
         state = {
+            "optional_processes": [a.name.removeprefix("start_") for a in plan.actions if a.name in {"start_tcpdump", "start_live", "start_leases", "start_sslsplit"}],
+            "features": {"capture": plan.capture_enabled, "live": plan.config.live, "leases": plan.config.lease_events, "tls": plan.tls_interception_enabled},
+            "evidence": {k: str(self.data_dir / Path(v).relative_to(DATA_DIR)) for k, v in plan.evidence_paths.items()},
+            "owner_uid": plan.config.owner_uid,
+            "tls_address": str(next(ip_network(plan.config.subnet).hosts())) if plan.config.tls else "",
             "state": "starting",
             "owner": "gainsec-gitm",
             "resources": [AP_SURFACE, NFT_TABLE],
             "previous_ipv4_forwarding": previous,
         }
         try:
+            if plan.evidence_paths:
+                target = self.data_dir / "users" / str(plan.config.owner_uid)
+                target.mkdir(parents=True, exist_ok=True, mode=0o711)
+                if shutil.disk_usage(target).free < (plan.config.capture_mb + 16) * 1_000_000:
+                    raise HelperError("insufficient free disk space for capture/evidence")
+                for output in state["evidence"].values():
+                    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                    os.fchmod(descriptor, 0o600)
+                    if os.geteuid() == 0:
+                        os.fchown(descriptor, plan.config.owner_uid, -1)
+                    os.close(descriptor)
             self.runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             self.runtime_dir.chmod(0o700)
+            if plan.config.lease_events:
+                self.lease_dir.mkdir(mode=0o700, exist_ok=True)
+                self.lease_dir.chmod(0o700)
+                if self.runner is _run:
+                    account = pwd.getpwnam("dnsmasq")
+                    os.chown(self.lease_dir, account.pw_uid, account.pw_gid)
+            if plan.tls_interception_enabled:
+                if ca_material is None:
+                    ca_material = ensure_local_ca(self.data_dir / "ca" / str(plan.config.owner_uid))
+                atomic_private(self.runtime_dir / "ca.crt", ca_material.certificate)
+                atomic_private(self.runtime_dir / "ca.key", ca_material.private_key)
+                if ca_material.chain:
+                    atomic_private(self.runtime_dir / "chain.pem", ca_material.chain)
+                public_cert = Path(state["evidence"]["certificate"])
+                atomic_private(public_cert, ca_material.certificate)
+                if os.geteuid() == 0:
+                    os.chown(public_cert, plan.config.owner_uid, -1)
             for source_path, content in plan.files.items():
-                self._write_private(self.runtime_dir / Path(source_path).name, content)
+                self._write_private(self.runtime_dir / Path(source_path).name, content.replace(LEASE_DIR, str(self.lease_dir)))
             self._save_state(state)
         except Exception as exc:
             cleanup_errors = self._remove_private_state()
@@ -683,8 +838,9 @@ class HelperEngine:
         try:
             self.forwarding_path.write_text("1\n", encoding="ascii")
             for action in plan.actions:
-                if action.name in {"start_dnsmasq", "start_hostapd"}:
-                    self._launch_process(action.name.removeprefix("start_"), action.argv, state)
+                if action.name in {"start_dnsmasq", "start_hostapd", "start_tcpdump", "start_live", "start_leases", "start_sslsplit"}:
+                    argv = tuple(arg.replace(DATA_DIR + "/", str(self.data_dir) + "/", 1) if arg.startswith(DATA_DIR + "/") else arg.replace(RUNTIME_DIR + "/", str(self.runtime_dir) + "/", 1) if arg.startswith(RUNTIME_DIR + "/") else arg.replace(LEASE_DIR + "/", str(self.lease_dir) + "/", 1) if arg.startswith(LEASE_DIR + "/") else arg for arg in action.argv)
+                    self._launch_process(action.name.removeprefix("start_"), argv, state)
                 else:
                     self.runner(action.argv)
             self.sleeper(self.stabilization_interval)
@@ -695,7 +851,7 @@ class HelperEngine:
             self._save_state(state)
             self.transition_hook("active_saved", None)
             self.log.write("AP session started")
-            return {"ok": True, "state": "active"}
+            return {"ok": True, "state": "active", "features": state["features"], "evidence": state["evidence"]}
         except Exception as exc:
             cleanup_errors = self._rollback(previous, f"start failed and rolled back: {type(exc).__name__}", state)
             detail = f"start failed and rolled back: {exc}"
@@ -704,6 +860,7 @@ class HelperEngine:
             raise HelperError(detail) from exc
 
     def stop(self) -> dict[str, object]:
+        self._last_failure = []
         loaded = self._load_state()
         if loaded.kind is StateKind.ABSENT:
             return {"ok": True, "state": "inactive"}
@@ -738,14 +895,71 @@ class HelperEngine:
             errors = self._liveness_errors(owned)
             if errors:
                 return {"ok": False, "state": "blocked", "backend": "system", "errors": errors}
-            return {"ok": True, "state": str(owned["state"]), "backend": "system"}
+            return {"ok": True, "state": str(owned["state"]), "backend": "system", "features": owned.get("features", {}), "evidence": owned.get("evidence", {})}
         occupied = tuple(self.resource_probe())
         if occupied:
             return {"ok": False, "state": "blocked", "backend": "system", "errors": list(occupied)}
+        if self._last_failure:
+            return {"ok": False, "state": "blocked", "backend": "system", "errors": self._last_failure}
         return {"ok": True, "state": "inactive", "backend": "system"}
 
-    def dispatch(self, request: Mapping[str, object]) -> dict[str, object]:
+    def watchdog(self) -> dict[str, object]:
+        loaded = self._load_state()
+        if loaded.kind is not StateKind.VALID_OWNED or loaded.state.get("state") != "active":
+            return {"ok": True}
+        errors = self._liveness_errors(loaded.state)
+        evidence = loaded.state.get("evidence", {})
+        if evidence:
+            try:
+                if shutil.disk_usage(self.data_dir).free < 16 * 1_000_000:
+                    errors.append("evidence disk reserve exhausted")
+            except OSError:
+                errors.append("evidence storage unavailable")
+        if errors:
+            try:
+                self.stop()
+            except HelperError as exc:
+                errors.append(str(exc))
+            self._last_failure = errors
+            self._safe_log("session stopped by liveness/storage watchdog")
+            return {"ok": False, "errors": errors}
+        return {"ok": True}
+
+    def dispatch(self, request: Mapping[str, object], *, requester_uid: int | None = None) -> dict[str, object]:
         action = request.get("action")
+        if action == "prepare-ca":
+            config = NetworkConfig(**request["config"])
+            validate_config(config)
+            if requester_uid is not None and config.owner_uid != requester_uid:
+                raise HelperError("CA owner must be the requesting user")
+            if config.profile:
+                material = verify_profile(config.profile)
+            elif config.ca_cert:
+                raw = request.get("ca_material")
+                if not isinstance(raw, dict) or not all(isinstance(v, str) and len(v) <= 128 * 1024 for v in raw.values()):
+                    raise HelperError("validated custom CA material is required")
+                material = validate_material(raw.get("certificate", "").encode(), raw.get("private_key", "").encode(), raw.get("chain", "").encode())
+            else:
+                material = ensure_local_ca(self.data_dir / "ca" / str(config.owner_uid))
+            return {"ok": True, "ca_material": {"certificate": material.certificate.decode(), "private_key": material.private_key.decode(), "chain": material.chain.decode(), "fingerprint": material.fingerprint, "trust_anchor": material.trust_anchor.decode()}}
+        if action == "inspect":
+            from .worker import read_events, safe_text
+            kind = request.get("kind", "live")
+            if kind not in {"live", "leases", "tls"}:
+                raise HelperError("unknown evidence kind")
+            uid = requester_uid if requester_uid is not None else os.getuid()
+            path = self.data_dir / "users" / str(uid) / ("tls.log" if kind == "tls" else f"{kind}.jsonl")
+            if kind == "tls":
+                try:
+                    with path.open("rb") as stream:
+                        size = os.fstat(stream.fileno()).st_size
+                        stream.seek(max(0, size - 16384))
+                        events = [{"connection": safe_text(line.decode("utf-8", "replace"))} for line in stream.read(16384).splitlines()[-min(max(int(request.get("limit", 20)), 1), 100):]]
+                except FileNotFoundError:
+                    events = []
+            else:
+                events = read_events(path, limit=request.get("limit", 20))
+            return {"ok": True, "kind": kind, "events": events, "path": str(path)}
         if action == "status":
             return self.status()
         if action == "stop":
@@ -754,7 +968,16 @@ class HelperEngine:
             raw_plan = request.get("plan")
             if not isinstance(raw_plan, Mapping):
                 raise HelperError("start requires a plan")
-            return self.start(OperationPlan.from_dict(raw_plan))
+            plan = OperationPlan.from_dict(raw_plan)
+            if requester_uid is not None and plan.config.owner_uid != requester_uid:
+                raise HelperError("evidence owner must be the requesting user")
+            raw_ca = request.get("ca_material")
+            ca_material = None
+            if raw_ca is not None:
+                if not isinstance(raw_ca, dict) or not all(isinstance(v, str) and len(v) <= 128 * 1024 for v in raw_ca.values()):
+                    raise HelperError("invalid custom CA material")
+                ca_material = CAMaterial(raw_ca.get("certificate", "").encode(), raw_ca.get("private_key", "").encode(), raw_ca.get("chain", "").encode())
+            return self.start(plan, ca_material=ca_material)
         raise HelperError("unknown action")
 
     def handle_signal(self, _signum, _frame) -> None:
@@ -771,7 +994,11 @@ def _handle_connection(connection: socket.socket, engine: HelperEngine, timeout:
         if not line or len(line) >= 1_048_576 or not line.endswith(b"\n"):
             raise HelperError("invalid request size or framing")
         request = json.loads(line)
-        response = engine.dispatch(request)
+        if hasattr(socket, "SO_PEERCRED"):
+            _pid, uid, _gid = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+        else:
+            uid = os.getuid()  # Off-device socketpair tests; shipped helper runs on Linux.
+        response = engine.dispatch(request, requester_uid=uid)
     except socket.timeout:
         response = {"ok": False, "error": "request timed out"}
     except Exception as exc:
@@ -786,8 +1013,13 @@ def _serve() -> int:
     signal.signal(signal.SIGTERM, engine.handle_signal)
     signal.signal(signal.SIGINT, engine.handle_signal)
     listener = socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.settimeout(0.25)
     while True:
-        connection, _address = listener.accept()
+        engine.watchdog()
+        try:
+            connection, _address = listener.accept()
+        except socket.timeout:
+            continue
         with connection:
             try:
                 _handle_connection(connection, engine)

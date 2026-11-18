@@ -24,6 +24,28 @@ def _fail(message: str) -> None:
 def validate_config(
     config: NetworkConfig, existing_networks: Iterable[IPv4Network] = ()
 ) -> NetworkConfig:
+    if not all(isinstance(getattr(config, name), str) for name in ("ssid", "passphrase", "country", "subnet", "resolver", "ap_interface", "wan_interface")):
+        _fail("network settings must be text")
+    if type(config.tls) is not bool:
+        _fail("TLS must be boolean")
+    if not all(isinstance(v, str) and len(v) <= 4096 and not any(ord(c) < 32 for c in v) for v in (config.ca_cert, config.ca_key, config.ca_chain, config.profile)):
+        _fail("invalid CA paths/profile")
+    if bool(config.ca_cert) != bool(config.ca_key) or (config.ca_chain and not config.ca_cert):
+        _fail("custom CA requires certificate and key, with optional complete chain")
+    if config.profile:
+        from .profiles import NAMES
+        if config.profile not in NAMES:
+            _fail("Unknown eMudhra profile")
+        if config.ca_cert or config.ca_key or config.ca_chain:
+            _fail("profile and custom CA are mutually exclusive")
+    if type(config.live) is not bool or type(config.lease_events) is not bool:
+        _fail("live and lease options must be boolean")
+    if type(config.capture) is not bool:
+        _fail("capture must be boolean")
+    if type(config.capture_mb) is not int or not 1 <= config.capture_mb <= 64:
+        _fail("capture size must be 1-64 MB")
+    if type(config.owner_uid) is not int or not 0 <= config.owner_uid < 2**31:
+        _fail("invalid evidence owner UID")
     if not config.ssid.strip() or not 1 <= len(config.ssid.encode("utf-8")) <= 32 or any(ord(c) < 32 for c in config.ssid):
         _fail("SSID must contain 1-32 printable UTF-8 bytes")
     if not 8 <= len(config.passphrase) <= 63 or any(ord(c) < 32 or ord(c) > 126 for c in config.passphrase):

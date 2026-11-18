@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 from ipaddress import IPv4Network
 from typing import Mapping
 
@@ -24,6 +25,16 @@ class NetworkConfig:
     resolver: str
     ap_interface: str
     wan_interface: str
+    tls: bool = False
+    ca_cert: str = ""
+    ca_key: str = ""
+    ca_chain: str = ""
+    profile: str = ""
+    live: bool = False
+    lease_events: bool = False
+    capture: bool = False
+    capture_mb: int = 8
+    owner_uid: int = field(default_factory=os.getuid)
 
 
 @dataclass(frozen=True)

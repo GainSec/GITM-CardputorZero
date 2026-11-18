@@ -1,11 +1,12 @@
 Package: gainsec-gitm
-Version: 0.1.0-1
+Version: 0.2.1-1
 Section: net
 Priority: optional
 Architecture: arm64
 Maintainer: GainSec <gainsec@users.noreply.github.com>
 Homepage: https://github.com/GainSec/GITM-CardputorZero
-Depends: python3 (>= 3.11), python3-pygame, hostapd, dnsmasq-base, network-manager, nftables, iw, iproute2, systemd, adduser
-Description: Authorized CardputerZero AP, DHCP, and NAT controller
- Native 320x170 interface and fail-closed package-owned networking helper.
- TLS interception and packet capture are not enabled in this release.
+Depends: python3 (>= 3.11), python3-pygame, hostapd, dnsmasq-base, network-manager, nftables, iw, iproute2, systemd, adduser, sslsplit, tcpdump, openssl, python3-cryptography
+Description: Authorized CardputerZero traffic research router
+ Native 320x170 AP, DHCP/DNS, Ethernet NAT, bounded capture and live metadata.
+ SSLsplit with local/custom CAs and exact recovered lab profiles; Android and
+ Burp exports, private evidence, owned process liveness and rollback.

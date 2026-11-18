@@ -67,3 +67,12 @@ def test_rejects_subnet_overlap_with_existing_networks():
 
 def test_accepts_valid_wired_wan_configuration():
     assert validate_config(valid_config(), existing_networks=[ip_network("10.0.0.0/8")]) == valid_config()
+
+
+@pytest.mark.parametrize('field,value', [('ssid', None), ('country', []), ('subnet', {}), ('resolver', 123), ('ap_interface', None)])
+def test_network_configuration_rejects_wrong_types_with_validation_error(field, value):
+    from dataclasses import replace
+    from gitm.model import NetworkConfig
+    candidate = NetworkConfig('Lab', 'lab-test-4821', 'US', '192.168.77.0/24', '1.1.1.1', 'wlan1', 'end0')
+    with pytest.raises(ValueError, match='text'):
+        validate_config(replace(candidate, **{field: value}))

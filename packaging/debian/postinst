@@ -7,6 +7,9 @@ if ! getent group gainsec-gitm >/dev/null 2>&1; then
     addgroup --system gainsec-gitm >/dev/null
 fi
 
+chgrp gainsec-gitm /usr/share/GITM/profiles/emudhra/*/ca.key
+chmod 0640 /usr/share/GITM/profiles/emudhra/*/ca.key
+
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable --now gainsec-gitm-helper.socket >/dev/null 2>&1 || true

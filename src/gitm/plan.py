@@ -1,6 +1,6 @@
 """Build a serializable, package-owned network operation plan."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from ipaddress import IPv4Network, ip_network
 from typing import Any, Mapping
 
@@ -12,6 +12,8 @@ RUNTIME_DIR = "/run/gainsec-gitm/private"
 LOG_DIR = "/var/log/gainsec-gitm"
 NFT_TABLE = "gainsec_gitm"
 AP_SURFACE = "gitm-ap"
+DATA_DIR = "/var/lib/gainsec-gitm"
+LEASE_DIR = "/run/gainsec-gitm/leases"
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,7 @@ class OperationPlan:
     tls_interception_enabled: bool = False
     nft_table: str = NFT_TABLE
     ap_surface: str = AP_SURFACE
+    evidence_paths: Mapping[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +54,7 @@ class OperationPlan:
             "tls_interception_enabled": self.tls_interception_enabled,
             "nft_table": self.nft_table,
             "ap_surface": self.ap_surface,
+            "evidence_paths": dict(self.evidence_paths),
         }
 
     @classmethod
@@ -65,6 +69,7 @@ class OperationPlan:
             tls_interception_enabled=bool(value["tls_interception_enabled"]),
             nft_table=str(value["nft_table"]),
             ap_surface=str(value["ap_surface"]),
+            evidence_paths=dict(value.get("evidence_paths", {})),
         )
 
 
@@ -73,6 +78,7 @@ def _hostapd(config: NetworkConfig) -> str:
         (
             f"interface={AP_SURFACE}",
             "driver=nl80211",
+            "ap_isolate=1",
             f"ssid={config.ssid}",
             f"country_code={config.country}",
             "hw_mode=g",
@@ -103,7 +109,7 @@ def _dnsmasq(config: NetworkConfig, network: IPv4Network) -> str:
             f"dhcp-option=option:router,{gateway}",
             f"dhcp-option=option:dns-server,{gateway}",
             f"server={config.resolver}",
-            "dhcp-leasefile=/dev/null",
+            f"dhcp-leasefile={LEASE_DIR}/dnsmasq.leases" if config.lease_events else "dhcp-leasefile=/dev/null",
             "log-facility=-",
             "no-resolv",
             "",
@@ -112,11 +118,19 @@ def _dnsmasq(config: NetworkConfig, network: IPv4Network) -> str:
 
 
 def _nftables(config: NetworkConfig, network: IPv4Network) -> str:
+    tls_accept = f'iifname "{AP_SURFACE}" tcp dport 8443 ct status dnat accept\n    ip daddr {next(network.hosts())} tcp dport 8443 drop' if config.tls else ''
+    redirect = f'''
+  chain prerouting {{
+    type nat hook prerouting priority dstnat; policy accept;
+    iifname "{AP_SURFACE}" ip saddr {network} tcp dport 443 redirect to :8443
+  }}
+''' if config.tls else ''
     return f"""table inet {NFT_TABLE} {{
   chain input {{
     type filter hook input priority -10; policy accept;
     iifname \"{AP_SURFACE}\" udp dport {{ 53, 67 }} accept
     iifname \"{AP_SURFACE}\" tcp dport 53 accept
+    {tls_accept}
     iifname \"{AP_SURFACE}\" drop
   }}
   chain forward {{
@@ -128,6 +142,7 @@ def _nftables(config: NetworkConfig, network: IPv4Network) -> str:
     oifname \"{AP_SURFACE}\" drop
     iifname \"{AP_SURFACE}\" drop
   }}
+{redirect}
   chain postrouting {{
     type nat hook postrouting priority srcnat; policy accept;
     oifname \"{config.wan_interface}\" ip saddr {network} masquerade
@@ -154,4 +169,27 @@ def build_plan(config: NetworkConfig) -> OperationPlan:
         Action("start_dnsmasq", ("dnsmasq", "--keep-in-foreground", "--pid-file=", f"--conf-file={RUNTIME_DIR}/dnsmasq.conf")),
         Action("start_hostapd", ("hostapd", f"{RUNTIME_DIR}/hostapd.conf")),
     )
-    return OperationPlan(config=config, actions=actions, files=files)
+    evidence = {}
+    if config.capture:
+        pcap = f"{DATA_DIR}/users/{config.owner_uid}/traffic.pcap"
+        evidence["pcap"] = pcap
+        actions += (Action("start_tcpdump", ("tcpdump", "-i", AP_SURFACE, "-nn", "-U", "-s", "0", "-C", str(config.capture_mb), "-W", "1", "-Z", "root", "-w", pcap)),)
+    for mode, enabled in (("live", config.live), ("leases", config.lease_events)):
+        if enabled:
+            output = f"{DATA_DIR}/users/{config.owner_uid}/{mode}.jsonl"
+            evidence[mode] = output
+            args = ("/usr/bin/python3", "-m", "gitm.worker", mode, "--output", output)
+            args += ("--interface", AP_SURFACE) if mode == "live" else ("--source", f"{LEASE_DIR}/dnsmasq.leases")
+            actions += (Action(f"start_{mode}", args),)
+    if config.tls:
+        connection_log = f"{DATA_DIR}/users/{config.owner_uid}/tls.log"
+        evidence["tls"] = connection_log
+        argv = ("sslsplit", "-u", "root", "-l", connection_log, "-k", f"{RUNTIME_DIR}/ca.key", "-c", f"{RUNTIME_DIR}/ca.crt")
+        if config.ca_chain or config.profile.endswith("-emsign"):
+            argv += ("-C", f"{RUNTIME_DIR}/chain.pem")
+        argv += ("ssl", str(gateway), "8443")
+        actions += (Action("start_sslsplit", argv),)
+        evidence["certificate"] = f"{DATA_DIR}/users/{config.owner_uid}/ca.crt"
+    # Bring up the beacon only after optional services have started.
+    actions = tuple(a for a in actions if a.name != "start_hostapd") + tuple(a for a in actions if a.name == "start_hostapd")
+    return OperationPlan(config=config, actions=actions, files=files, capture_enabled=config.capture, tls_interception_enabled=config.tls, evidence_paths=evidence)

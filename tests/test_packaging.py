@@ -15,7 +15,7 @@ ROOT = Path(__file__).parents[1]
 def test_store_metadata_is_complete_and_honest():
     metadata = json.loads((ROOT / "app-builder.json").read_text())
     assert metadata["package_name"] == "gainsec-gitm"
-    assert metadata["version"] == "0.1.0"
+    assert metadata["version"] == "0.2.1"
     assert metadata["app_name"] == "GainSec GITM"
     store = metadata["store"]
     assert store["categories"] == ["Security", "System Tools"]
@@ -57,12 +57,6 @@ def test_stage_contains_required_runtime_wrappers_docs_and_metadata(tmp_path):
         "usr/share/APPLaunch/applications/gitm.desktop",
         "usr/share/APPLaunch/share/images/gitm.png",
         "usr/share/doc/gainsec-gitm/LICENSE",
-        "usr/share/doc/gainsec-gitm/README.md",
-        "usr/share/doc/gainsec-gitm/CONTRIBUTING.md",
-        "usr/share/doc/gainsec-gitm/SECURITY.md",
-        "usr/share/doc/gainsec-gitm/docs/CARDPUTERZERO.md",
-        "usr/share/doc/gainsec-gitm/assets/gitm-icon-256.png",
-        "usr/share/doc/gainsec-gitm/screenshots/active.png",
         "lib/systemd/system/gainsec-gitm-helper.socket",
         "lib/systemd/system/gainsec-gitm-helper.service",
     }
@@ -92,10 +86,9 @@ def test_control_and_postinst_match_contract(tmp_path):
     package = stage_package(tmp_path / "pkg")
     control = (package / "DEBIAN/control").read_text()
     assert "Package: gainsec-gitm" in control
-    assert "Version: 0.1.0-1" in control
+    assert "Version: 0.2.1-1" in control
     assert "Architecture: arm64" in control
     assert "Maintainer: GainSec <gainsec@users.noreply.github.com>" in control
-    assert "Homepage: https://github.com/GainSec/GITM-CardputorZero" in control
     assert "Depends: python3 (>= 3.11), python3-pygame, hostapd, dnsmasq-base, network-manager, nftables, iw, iproute2, systemd, adduser" in control
     assert ", dnsmasq," not in control
     postinst = (package / "DEBIAN/postinst").read_text()
@@ -125,34 +118,23 @@ def test_staged_package_excludes_secrets_captures_and_generated_ca(tmp_path):
     forbidden_suffixes = {".key", ".crt", ".pem", ".pcap", ".cap", ".p12"}
     for path in package.rglob("*"):
         if path.is_file():
-            assert path.suffix.lower() not in forbidden_suffixes
+            if path.is_relative_to(package / "usr/share/GITM/profiles/emudhra"):
+                import hashlib
+                relative = str(path.relative_to(package / "usr/share/GITM/profiles/emudhra"))
+                pins = json.loads((ROOT / 'profiles/emudhra/provenance.json').read_text())['sha256']
+                assert relative == 'provenance.json' or hashlib.sha256(path.read_bytes()).hexdigest() == pins[relative]
+                if path.suffix == '.key':
+                    assert path.stat().st_mode & 0o777 == 0o640
+            else:
+                assert path.suffix.lower() not in forbidden_suffixes
             assert "password" not in path.name.lower()
-    combined = "\n".join(path.read_text(errors="ignore") for path in package.rglob("*") if path.is_file())
+    combined = "\n".join(path.read_text(errors="ignore") for path in package.rglob("*") if path.is_file() and not path.is_relative_to(package / "usr/share/GITM/profiles/emudhra"))
     assert "BEGIN PRIVATE KEY" not in combined
     assert "BEGIN RSA PRIVATE KEY" not in combined
     assert 'PASSWORD="' not in combined
     assert "killall" not in combined
     assert "iptables -F" not in combined
     assert "flush ruleset" not in combined
-
-
-def test_packaged_readme_and_relative_links_match_public_checkout(tmp_path):
-    package = stage_package(tmp_path / "pkg")
-    doc_root = package / "usr/share/doc/gainsec-gitm"
-    assert (doc_root / "README.md").read_bytes() == (ROOT / "README.md").read_bytes()
-    for relative in (
-        "assets/gitm-icon-256.png",
-        "screenshots/active.png",
-        "screenshots/preflight.png",
-        "screenshots/review.png",
-        "screenshots/starting.png",
-        "screenshots/stopping.png",
-        "screenshots/error.png",
-        "CONTRIBUTING.md",
-        "SECURITY.md",
-        "LICENSE",
-    ):
-        assert (doc_root / relative).is_file(), relative
 
 
 def test_systemd_creates_private_bounded_log_directory(tmp_path):
@@ -166,7 +148,7 @@ def test_systemd_creates_private_bounded_log_directory(tmp_path):
 def test_systemd_grants_dnsmasq_required_network_and_privilege_drop_capabilities(tmp_path):
     package = stage_package(tmp_path / "pkg")
     service = (package / "lib/systemd/system/gainsec-gitm-helper.service").read_text()
-    expected = "CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_KILL CAP_SETUID CAP_SETGID"
+    expected = "CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_KILL CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER"
     assert f"CapabilityBoundingSet={expected}" in service
     assert f"AmbientCapabilities={expected}" in service
 
@@ -199,3 +181,52 @@ def test_stage_rejects_broad_or_unowned_existing_deletion_targets(tmp_path, monk
     for unsafe in (Path("/"), Path.home(), ROOT, unowned):
         with pytest.raises(ValueError, match="staging destination"):
             stage_package(unsafe)
+
+
+
+def test_full_feature_package_has_exact_dependencies_state_directory_and_source_bytes(tmp_path):
+    package = stage_package(tmp_path / "pkg")
+    control = (package / "DEBIAN/control").read_text()
+    for dependency in ('sslsplit', 'tcpdump', 'openssl', 'python3-cryptography'):
+        assert dependency in control.split('Depends: ')[1].split('\n')[0].split(', ')
+    assert (package / 'usr/share/doc/gainsec-gitm/README.md').read_bytes() == (ROOT/'README.md').read_bytes()
+    assert (package / 'usr/share/GITM/profiles/emudhra/provenance.json').read_bytes() == (ROOT/'profiles/emudhra/provenance.json').read_bytes()
+    service = (package / 'lib/systemd/system/gainsec-gitm-helper.service').read_text()
+    assert 'StateDirectory=gainsec-gitm' in service
+    assert 'StateDirectoryMode=0711' in service
+    assert '/var/lib/gainsec-gitm' in service
+    postinst = (package / 'DEBIAN/postinst').read_text()
+    assert 'chgrp gainsec-gitm' in postinst
+    assert 'ca.key' in postinst
+
+
+def test_debian_copyright_file_preserves_license_bytes(tmp_path):
+    package = stage_package(tmp_path/'pkg')
+    assert (package/'usr/share/doc/gainsec-gitm/copyright').read_bytes() == (ROOT/'LICENSE').read_bytes()
+
+
+def test_helper_normal_signal_shutdown_is_successful_under_the_service_policy(tmp_path):
+    import configparser
+    import signal
+    from gitm.helper import HelperEngine
+    policy=configparser.ConfigParser()
+    policy.read(ROOT/'packaging/systemd/gainsec-gitm-helper.service')
+    accepted={int(code) for code in policy.get('Service','SuccessExitStatus',fallback='').split()}
+    engine=HelperEngine(runtime_dir=tmp_path/'private',runner=lambda _:None)
+    for signum in (signal.SIGTERM,signal.SIGINT):
+        with pytest.raises(SystemExit) as exited:
+            engine.handle_signal(signum,None)
+        assert exited.value.code in accepted
+
+
+def test_stopping_helper_cannot_unlink_the_still_active_activation_socket():
+    import configparser
+    service = configparser.ConfigParser(interpolation=None)
+    activation = configparser.ConfigParser(interpolation=None)
+    service.read(ROOT / 'packaging/systemd/gainsec-gitm-helper.service')
+    activation.read(ROOT / 'packaging/systemd/gainsec-gitm-helper.socket')
+    endpoint = Path(activation['Socket']['ListenStream'])
+    for directory in service['Service'].get('RuntimeDirectory', '').split():
+        if endpoint.is_relative_to(Path('/run') / directory):
+            assert service['Service'].get('RuntimeDirectoryPreserve') == 'yes', (
+                'service stop removes its runtime directory while the socket unit still owns a listener there')

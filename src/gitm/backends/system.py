@@ -1,5 +1,6 @@
 """Narrow system backend; state changes are delegated to the owned helper."""
 
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,8 @@ import socket
 import subprocess
 from typing import Callable, Sequence
 
+from ..certificates import CAMaterial
+from ..configuration import load_ca_material
 from ..discovery import discover_interfaces
 from ..model import InterfaceDiscovery, NetworkConfig
 from ..plan import OperationPlan
@@ -35,7 +38,7 @@ def _physical_device(name: str) -> bool:
 
 class SystemBackend:
     name = "system"
-    required_tools = ("ip", "iw", "nmcli", "nft", "hostapd", "dnsmasq")
+    required_tools = ("ip", "iw", "nmcli", "nft", "hostapd", "dnsmasq", "tcpdump", "sslsplit", "openssl")
 
     def __init__(
         self,
@@ -116,7 +119,7 @@ class SystemBackend:
     def _request(self, payload: dict[str, object]) -> dict[str, object]:
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(5.0)
+                client.settimeout(30.0)
                 client.connect(str(self.helper_socket))
                 client.sendall(json.dumps(payload, sort_keys=True).encode() + b"\n")
                 data = client.makefile("rb").readline(1_048_576)
@@ -154,7 +157,11 @@ class SystemBackend:
         helper = self._request({"action": "status"})
         if not helper.get("ok") or helper.get("state") != "inactive":
             raise BackendUnavailable("system preflight failed: required resources occupied")
-        return self._request({"action": "start", "plan": plan.to_dict()})
+        material = load_ca_material(plan.config)
+        payload = {"action": "start", "plan": plan.to_dict()}
+        if plan.config.ca_cert and material is not None:
+            payload["ca_material"] = {"certificate": material.certificate.decode(), "private_key": material.private_key.decode(), "chain": material.chain.decode()}
+        return self._request(payload)
 
     def stop(self) -> dict[str, object]:
         if not self.helper_socket.exists():
@@ -165,3 +172,18 @@ class SystemBackend:
         if not self.helper_socket.exists():
             return {"ok": False, "state": "unavailable", "backend": self.name}
         return self._request({"action": "status"})
+
+
+    def ca_material(self, config: NetworkConfig) -> CAMaterial:
+        material = load_ca_material(config)
+        payload = {"action": "prepare-ca", "config": asdict(config)}
+        if config.ca_cert and material is not None:
+            payload["ca_material"] = {"certificate": material.certificate.decode(), "private_key": material.private_key.decode(), "chain": material.chain.decode()}
+        response = self._request(payload)
+        if not response.get("ok"):
+            raise BackendUnavailable(str(response.get("error", "CA preparation failed")))
+        raw = response["ca_material"]
+        return CAMaterial(raw["certificate"].encode(), raw["private_key"].encode(), raw.get("chain", "").encode(), raw.get("fingerprint", ""), raw.get("trust_anchor", "").encode())
+
+    def inspect(self, *, kind="live", limit=20):
+        return self._request({"action": "inspect", "kind": kind, "limit": limit})
