@@ -1,7 +1,5 @@
 # GainSec GITM for CardputerZero
 
-The **0.2.1 full-feature suite** runs natively on the CardputerZero's **320×170** display and physical keyboard. The current validated Debian package is **`gainsec-gitm_0.2.1-1_arm64.deb`**.
-
 GITM operates an authorized WPA2 research AP with DHCP, DNS, physical Ethernet WAN and NAT. It provides selectable full-packet capture, live traffic metadata, SSLsplit interception with local or validated custom CAs, all twelve recovered eMudhra lab profiles, timestamped lease events, Android certificate preparation and Burp exports. All six native GUI pages and the CLI operate these implemented features.
 
 [Installation](#installation) · [GUI and keyboard](#gui-and-keyboard) · [CLI operation](#cli-operation) · [CA and export workflows](#ca-and-export-workflows) · [All 12 eMudhra profiles](#all-12-emudhra-profiles) · [Evidence and safety](#evidence-and-safety) · [Physical validation](#physical-validation) · [Build and package verification](#build-and-package-verification)
